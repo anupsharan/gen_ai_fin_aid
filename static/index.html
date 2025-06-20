@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>AI Stock Screener</title>
+   <script src="https://cdn.tailwindcss.com"></script>
+   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+   <style>
+       body {
+           font-family: 'Inter', sans-serif;
+       }
+       /* Custom scrollbar for a better look in dark mode */
+       ::-webkit-scrollbar {
+           width: 8px;
+       }
+       ::-webkit-scrollbar-track {
+           background: #1f2937;
+       }
+       ::-webkit-scrollbar-thumb {
+           background: #4b5563;
+           border-radius: 4px;
+       }
+       ::-webkit-scrollbar-thumb:hover {
+           background: #6b7280;
+       }
+       .portfolio-item:hover, .watchlist-item:hover {
+           background-color: #374151;
+       }
+       /* Animation for loading spinner */
+       @keyframes spin {
+           to { transform: rotate(360deg); }
+       }
+       .loader {
+           border: 4px solid rgba(255, 255, 255, 0.2);
+           border-left-color: #34d399;
+           animation: spin 1s linear infinite;
+       }
+       /* Style for recommendation tags */
+       .rec-tag {
+           font-size: 0.8rem;
+           font-weight: 600;
+           padding: 2px 8px;
+           border-radius: 9999px;
+           text-transform: uppercase;
+       }
+       .rec-buy { background-color: #10b981; color: white; }
+       .rec-sell { background-color: #ef4444; color: white; }
+       .rec-hold { background-color: #f59e0b; color: white; }
+   </style>
+</head>
+<body class="bg-gray-900 text-gray-200">
+
+
+   <div class="flex flex-col md:flex-row min-h-screen">
+
+
+       <!-- Left Pane: Portfolio -->
+       <aside class="w-full md:w-64 bg-gray-800 p-4 border-r border-gray-700 flex-shrink-0">
+           <h2 class="text-xl font-bold mb-4 text-white">Portfolio</h2>
+           <!-- This list will now be populated by JavaScript -->
+           <div id="portfolio-list" class="space-y-2">
+                <div class="text-center text-gray-400">Loading...</div>
+           </div>
+       </aside>
+
+
+       <!-- Main Body: Analysis -->
+       <main class="flex-grow p-4 md:p-6 lg:p-8">
+           <div class="max-w-4xl mx-auto">
+               <h1 class="text-3xl font-bold mb-4 text-white">Stock Analysis</h1>
+               <div class="flex flex-col sm:flex-row gap-4 mb-6">
+                   <input type="text" id="stock-symbol-input" class="flex-grow bg-gray-800 border border-gray-700 rounded-md px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" placeholder="Enter stock symbol (e.g., MSFT)">
+                   <button id="analyze-btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-md transition duration-200 flex items-center justify-center">
+                       <span id="analyze-btn-text">Analyze</span>
+                       <div id="analyze-btn-loader" class="loader w-6 h-6 rounded-full hidden"></div>
+                   </button>
+               </div>
+
+
+               <div id="analysis-result" class="bg-gray-800 p-6 rounded-lg shadow-lg min-h-[400px]">
+                    <div id="welcome-message" class="text-center text-gray-400 flex flex-col items-center justify-center h-full">
+                       <svg class="w-16 h-16 mb-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                       <h3 class="text-xl font-semibold">AI-Powered Stock Analysis</h3>
+                       <p class="mt-2">Enter a stock symbol or select from your portfolio to begin.</p>
+                   </div>
+               </div>
+           </div>
+       </main>
+
+
+       <!-- Right Pane: Watchlist -->
+       <aside class="w-full md:w-72 bg-gray-800 p-4 border-l border-gray-700 flex-shrink-0">
+           <!-- Renamed from "Undervalued Watchlist" to "Watchlist" -->
+           <h2 class="text-xl font-bold mb-4 text-white">Watchlist</h2>
+           <div id="watchlist" class="space-y-3">
+               <div class="text-center text-gray-400">Loading...</div>
+           </div>
+       </aside>
+
+
+   </div>
+
+
+   <script>
+       const API_BASE_URL = "http://127.0.0.1:8000"; // Your running FastAPI server
+
+
+       // --- DOM ELEMENT SELECTORS ---
+       const stockInput = document.getElementById('stock-symbol-input');
+       const analyzeBtn = document.getElementById('analyze-btn');
+       const analyzeBtnText = document.getElementById('analyze-btn-text');
+       const analyzeBtnLoader = document.getElementById('analyze-btn-loader');
+       const analysisResult = document.getElementById('analysis-result');
+       const watchlist = document.getElementById('watchlist');
+       const portfolioList = document.getElementById('portfolio-list');
+
+
+       // --- HELPER FUNCTIONS ---
+       const toggleLoading = (isLoading) => {
+           if (isLoading) {
+               analyzeBtnText.classList.add('hidden');
+               analyzeBtnLoader.classList.remove('hidden');
+               analyzeBtn.disabled = true;
+               analysisResult.innerHTML = `
+                   <div class="flex items-center justify-center h-full w-full">
+                       <div class="text-center">
+                           <div class="loader w-16 h-16 rounded-full mx-auto"></div>
+                           <p class="mt-4 text-lg text-gray-400">AI agents are analyzing... Please wait.</p>
+                       </div>
+                   </div>`;
+           } else {
+               analyzeBtnText.classList.remove('hidden');
+               analyzeBtnLoader.classList.add('hidden');
+               analyzeBtn.disabled = false;
+           }
+       };
+
+
+       const getRecommendationClass = (rec) => {
+           rec = rec.toUpperCase();
+           if (rec === 'BUY') return 'rec-buy';
+           if (rec === 'SELL') return 'rec-sell';
+           return 'rec-hold';
+       };
+
+
+       const formatNumber = (num, prefix = '', decimals = 2) => {
+           if (num === null || num === undefined) return 'N/A';
+           return `${prefix}${num.toFixed(decimals)}`;
+       };
+      
+       // --- API CALL & RENDER FUNCTIONS ---
+       const analyzeTicker = async (ticker) => {
+           if (!ticker) {
+               alert("Please enter a stock ticker.");
+               return;
+           }
+           stockInput.value = ticker;
+           toggleLoading(true);
+
+
+           try {
+               const response = await fetch(`${API_BASE_URL}/api/analyze/${ticker}`);
+               if (!response.ok) {
+                   const errorData = await response.json();
+                   throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+               }
+               const data = await response.json();
+               renderResults(data);
+           } catch (error) {
+               analysisResult.innerHTML = `<div class="text-center text-red-400 p-8">Error: ${error.message}</div>`;
+               console.error('Analysis failed:', error);
+           } finally {
+               toggleLoading(false);
+           }
+       };
+
+
+       const renderResults = (data) => {
+           const { ticker, fundamental, technical, sentiment, final_recommendation } = data;
+          
+           analysisResult.innerHTML = `
+               <div class="space-y-6">
+                   <!-- Header -->
+                   <div class="pb-4 border-b border-gray-700">
+                       <div class="flex justify-between items-start">
+                            <div>
+                               <h2 class="text-2xl font-bold text-white">${fundamental.company_name} (${ticker})</h2>
+                               <p class="text-4xl font-bold text-emerald-400 mt-1">${formatNumber(fundamental.price, '$')}</p>
+                           </div>
+                           <div class="text-right flex flex-col items-end">
+                               <p class="text-sm text-gray-400">Overall Recommendation</p>
+                               <span class="text-lg font-bold mt-1 ${getRecommendationClass(final_recommendation.overall_recommendation)} px-4 py-1 rounded-md">${final_recommendation.overall_recommendation}</span>
+                           </div>
+                       </div>
+                   </div>
+
+
+                   <!-- Analysis Sections -->
+                   <div class="grid md:grid-cols-3 gap-6 text-sm">
+                       <!-- Fundamental -->
+                       <div class="bg-gray-900 p-4 rounded-lg">
+                           <h4 class="font-bold text-lg mb-3 flex justify-between items-center">Fundamental <span class="rec-tag ${getRecommendationClass(fundamental.recommendation)}">${fundamental.recommendation}</span></h4>
+                           <ul class="space-y-2 text-gray-300">
+                               <li class="flex justify-between"><span>Analyst Target:</span> <span class="font-semibold">${formatNumber(fundamental.analyst_price_target, '$')}</span></li>
+                               <li class="flex justify-between"><span>P/E Ratio:</span> <span class="font-semibold">${formatNumber(fundamental.pe_ratio, '', 2)}</span></li>
+                               <li class="flex justify-between"><span>Rev Growth (YoY):</span> <span class="font-semibold">${formatNumber(fundamental.revenue_growth_yoy, '', 2)}%</span></li>
+                           </ul>
+                       </div>
+                       <!-- Technical -->
+                       <div class="bg-gray-900 p-4 rounded-lg">
+                           <h4 class="font-bold text-lg mb-3 flex justify-between items-center">Technical <span class="rec-tag ${getRecommendationClass(technical.recommendation)}">${technical.recommendation}</span></h4>
+                            <ul class="space-y-2 text-gray-300">
+                               <li class="flex justify-between"><span>RSI (14-day):</span> <span class="font-semibold">${formatNumber(technical.rsi_14, '', 2)}</span></li>
+                               <li class="flex justify-between"><span>EMA (50-day):</span> <span class="font-semibold">${formatNumber(technical.ema_50, '$', 2)}</span></li>
+                               <!-- Display the ADX value -->
+                               <li class="flex justify-between"><span>ADX (14-day):</span> <span class="font-semibold">${formatNumber(technical.adx_14, '', 2)}</span></li>
+                           </ul>
+                       </div>
+                       <!-- Sentiment -->
+                       <div class="bg-gray-900 p-4 rounded-lg">
+                           <h4 class="font-bold text-lg mb-3 flex justify-between items-center">Sentiment <span class="rec-tag ${getRecommendationClass(sentiment.recommendation)}">${sentiment.recommendation}</span></h4>
+                           <p class="text-gray-400">${sentiment.sentiment_summary}</p>
+                       </div>
+                   </div>
+
+
+                   <!-- Final Recommendation -->
+                   <div class="bg-gray-900 p-4 rounded-lg">
+                       <!-- Renamed from "Analyst's Verdict" to "Our Verdict" -->
+                       <h4 class="font-bold text-lg mb-2">Our Verdict</h4>
+                       <p class="text-gray-300 leading-relaxed">${final_recommendation.overall_reasoning}</p>
+                       <!-- Buy and Sell buttons -->
+                       <div class="flex gap-4 pt-4 mt-4 border-t border-gray-700">
+                          <button class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-md transition" onclick="executeTrade('buy', '${ticker}')">Buy ${ticker}</button>
+                          <button class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-md transition" onclick="executeTrade('sell', '${ticker}')">Sell ${ticker}</button>
+                       </div>
+                   </div>
+               </div>
+           `;
+       };
+      
+       //  Function to load the portfolio from the backend
+       const loadPortfolio = async () => {
+           try {
+               const response = await fetch(`${API_BASE_URL}/api/portfolio`);
+               if (!response.ok) throw new Error("Could not fetch portfolio.");
+               const tickers = await response.json();
+              
+               portfolioList.innerHTML = tickers.map(ticker => `
+                   <div class="portfolio-item cursor-pointer p-2 rounded-md" onclick="analyzeTicker('${ticker}')">${ticker}</div>
+               `).join('');
+           } catch (error) {
+               portfolioList.innerHTML = `<div class="text-red-400 text-sm">${error.message}</div>`;
+               console.error(error);
+           }
+       };
+
+
+       const loadWatchlist = async () => {
+           try {
+               // This endpoint was previously called undervalued-stocks
+               const response = await fetch(`${API_BASE_URL}/api/undervalued-stocks`);
+               if (!response.ok) throw new Error("Could not fetch watchlist.");
+               const stocks = await response.json();
+              
+               watchlist.innerHTML = stocks.map(stock => `
+                   <div class="watchlist-item cursor-pointer p-3 rounded-lg" onclick="analyzeTicker('${stock.ticker}')">
+                       <p class="font-bold text-md text-white">${stock.ticker} - ${stock.company_name}</p>
+                       <p class="text-xs text-gray-400 mt-1">${stock.reason}</p>
+                   </div>
+               `).join('');
+           } catch (error) {
+               watchlist.innerHTML = `<div class="text-center text-red-400 text-sm">${error.message}</div>`;
+               console.error(error);
+           }
+       };
+      
+       // Function to handle simulated trades
+       const executeTrade = async (action, ticker) => {
+           try {
+               const response = await fetch(`${API_BASE_URL}/api/trade/${action}`, {
+                   method: 'POST',
+                   headers: {
+                       'Content-Type': 'application/json',
+                   },
+                   body: JSON.stringify({ ticker: ticker }),
+               });
+               if (!response.ok) {
+                   throw new Error(`Trade execution failed for ${ticker}.`);
+               }
+               const result = await response.json();
+               alert(result.message); // Display the confirmation message from the backend
+           } catch (error) {
+               alert(error.message);
+               console.error('Trade failed:', error);
+           }
+       };
+
+
+       // --- EVENT LISTENERS & INITIALIZATION ---
+      
+       analyzeBtn.addEventListener('click', () => {
+           const ticker = stockInput.value.trim().toUpperCase();
+           analyzeTicker(ticker);
+       });
+
+
+       stockInput.addEventListener('keyup', (e) => {
+           if (e.key === 'Enter') {
+               analyzeBtn.click();
+           }
+       });
+
+
+       // Initial load
+       window.onload = () => {
+           loadPortfolio();
+           loadWatchlist();
+       };
+
+
+   </script>
+</body>
+</html>
