@@ -37,3 +37,6 @@ venv.bak
 # Temp files
 *.log
 *.tmp
+
+#Own Ref
+help.txt
